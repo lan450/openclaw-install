@@ -1,15 +1,10 @@
-# 🇨🇳 OpenClaw 国内一键安装脚本
+# OpenClaw 一键安装脚本
 
-> 在国内网络环境下快速安装 OpenClaw
+English | [中文](./README.md)
 
-## 功能特性
+Automated installation script for OpenClaw with optimized Chinese network mirrors.
 
-- 🎯 **自动检测最佳镜像** - 每个环节都验证国内连接
-- 🌍 **智能镜像切换** - NPM/GitHub/NVM 自动选最优
-- 🔄 **失败自动重试** - 某镜像不可用时自动切换
-- 🖥️ **跨平台支持** - macOS / Linux / Windows
-
-## 快速开始
+## Quick Install
 
 ### macOS / Linux
 
@@ -17,61 +12,81 @@
 curl -sSL https://raw.githubusercontent.com/lan450/openclaw-install/main/install.sh | bash
 ```
 
-或者指定安装目录：
-
-```bash
-curl -sSL https://raw.githubusercontent.com/lan450/openclaw-install/main/install.sh | bash -s -- --dir ~/openclaw
-```
-
-### Windows (管理员 PowerShell)
+### Windows (PowerShell)
 
 ```powershell
 irm https://raw.githubusercontent.com/lan450/openclaw-install/main/install.ps1 | iex
 ```
 
-或者保存后执行：
+## Features
 
-```powershell
-irm https://raw.githubusercontent.com/lan450/openclaw-install/main/install.ps1 -o install.ps1
-.\install.ps1
-```
+- 🌐 **Network Detection** - Tests connectivity to various mirrors
+- 🔄 **Auto Mirror Selection** - Picks the fastest available mirror
+- 📦 **Node.js Auto-Install** - Installs Node.js 22 if needed
+- 🇨🇳 **Chinese Mirrors Optimized**
+  - NPM: npmmirror.com, tuna.tsinghua.edu.cn
+  - GitHub: ghproxy.com, moeyy.cn
+  - Node.js: USTC mirror
 
-## 安装后
+## Tested Mirrors
+
+| Service | Mirror | Status |
+|---------|--------|--------|
+| NPM | registry.npmmirror.com | ✅ |
+| NPM | npm.tuna.tsinghua.edu.cn | ✅ |
+| GitHub | ghproxy.com | ✅ |
+| GitHub | moeyy.cn | ✅ |
+| Node.js | mirrors.ustc.edu.cn | ✅ |
+
+## Manual Installation
+
+If you prefer manual installation:
 
 ```bash
-cd ~/openclaw
+# 1. Install Node.js 18+
+curl -fsSL https://fnm.vercel.app/install | bash
+fnm install 22
+fnm use 22
 
-# 初始化配置
+# 2. Set NPM mirror
+npm config set registry https://registry.npmmirror.com
+
+# 3. Install OpenClaw
+npm install -g openclaw
+
+# 4. Initialize
 openclaw init
-
-# 启动
-openclaw start
+openclaw gateway start
 ```
 
-## 镜像说明
+## Requirements
 
-| 类别 | 备用镜像 |
-|------|---------|
-| NPM | registry.npmmirror.com, npmjs.org |
-| GitHub | moeyy.cn, github.com |
-| Node.js | nodejs.org, nvm.uihtm.com |
+- macOS / Linux / Windows (with WSL or PowerShell)
+- curl or wget
+- Git
 
-## 常见问题
+## Usage
 
-### Q: 安装失败怎么办？
-A: 检查网络连接，或手动指定镜像后重试。
+```bash
+# Start gateway
+openclaw gateway start
 
-### Q: Node.js 版本过低？
-A: 脚本会自动安装 Node.js 22 LTS。
+# Check status
+openclaw gateway status
 
-### Q: Windows 上提示权限不足？
-A: 请以管理员身份运行 PowerShell。
+# View logs
+openclaw gateway logs
 
-## 作者
+# Stop gateway
+openclaw gateway stop
+```
 
-- Author: lan450
-- GitHub: https://github.com/lan450/openclaw-install
+## Support
 
-## 许可证
+- Documentation: https://docs.openclaw.ai
+- Discord: https://discord.com/invite/clawd
+- GitHub: https://github.com/openclaw/openclaw
 
-MIT
+---
+
+*Maintained by 小爪 🐾*

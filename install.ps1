@@ -1,206 +1,240 @@
-# OpenClaw 国内一键安装脚本
-# 测试环境: Windows PowerShell
-# 作者: lan450
+# OpenClaw 一键安装脚本 (Windows PowerShell)
+# 作者: 小爪
 
 param(
-    [string]$InstallDir = "$env:USERPROFILE\openclaw",
-    [string]$Version = "latest"
+    [switch]$SkipNodeInstall,
+    [switch]$SkipGatewayStart
 )
 
 $ErrorActionPreference = "Stop"
 
-# ========== 配置 ==========
-$Script:OpenclawRepo = "https://github.com/openclaw/openclaw"
+# 颜色函数
+function Write-Info { Write-Host "[INFO] $args" -ForegroundColor Cyan }
+function Write-Success { Write-Host "[SUCCESS] $args" -ForegroundColor Green }
+function Write-Warn { Write-Host "[WARN] $args" -ForegroundColor Yellow }
+function Write-Error { Write-Host "[ERROR] $args" -ForegroundColor Red }
 
-# 国内镜像列表
-$Script:NpmMirrors = @(
-    "https://registry.npmmirror.com",
-    "https://registry.npmjs.org"
-)
+Write-Host "========================================" -ForegroundColor Magenta
+Write-Host "  OpenClaw 一键安装脚本 (Windows)" -ForegroundColor Magenta
+Write-Host "  作者: 小爪 🐾" -ForegroundColor Magenta
+Write-Host "========================================" -ForegroundColor Magenta
+Write-Host
 
-$Script:GithubMirrors = @(
-    "https://moeyy.cn/https://github.com",
-    "https://github.com"
-)
-
-# ========== 颜色输出 ==========
-function Write-ColorOutput {
-    param([string]$Message, [string]$Color = "White")
-    $colors = @{
-        "Red"     = [ConsoleColor]::Red
-        "Green"   = [ConsoleColor]::Green
-        "Yellow"  = [ConsoleColor]::Yellow
-        "Blue"    = [ConsoleColor]::Cyan
-        "White"   = [ConsoleColor]::White
-    }
-    Write-Host $Message -ForegroundColor $colors[$Color]
+#=============================================
+# 1. 检测操作系统
+#=============================================
+Write-Info "检测操作系统..."
+$OS = $PSVersionTable.OS
+if ($OS -match "Windows") {
+    Write-Success "检测到 Windows"
+} else {
+    Write-Error "仅支持 Windows，请使用 install.sh (WSL/macOS/Linux)"
+    exit 1
 }
 
-function Log-Info { Write-ColorOutput "[INFO] $args" "Blue" }
-function Log-Success { Write-ColorOutput "[OK] $args" "Green" }
-function Log-Warn { Write-ColorOutput "[WARN] $args" "Yellow" }
-function Log-Error { Write-ColorOutput "[ERROR] $args" "Red" }
+#=============================================
+# 2. 网络检测
+#=============================================
+Write-Info "检测网络连接..."
 
-# ========== 网络测试 ==========
 function Test-Url {
-    param([string]$Url)
+    param([string]$Url, [int]$Timeout=5)
     try {
-        $response = Invoke-WebRequest -Uri $Url -Method Head -TimeoutSec 5 -UseBasicParsing
-        return $response.StatusCode -in @(200, 301, 302)
+        $result = Invoke-WebRequest -Uri $Url -Method Head -TimeoutSec $Timeout -UseBasicParsing -ErrorAction SilentlyContinue
+        return $result.StatusCode -in @(200, 301, 302)
     } catch {
         return $false
     }
 }
 
-# ========== 选择最佳镜像 ==========
-function Find-BestMirror {
-    param([string]$Name, [string[]]$Mirrors)
-    
-    Log-Info "检测 $Name 镜像..."
-    foreach ($mirror in $Mirrors) {
-        if (Test-Url $mirror) {
-            Log-Success "使用 $mirror"
-            return $mirror
-        }
-    }
-    Log-Error "所有 $Name 镜像均不可用"
-    return $null
-}
+$testUrls = @(
+    "https://registry.npmmirror.com",
+    "https://github.com",
+    "https://nodejs.org"
+)
 
-# ========== 检测 Node.js ==========
-function Test-NodeInstalled {
-    try {
-        $version = node --version
-        if ($version -match "v(\d+)\.") {
-            return [int]$Matches[1] -ge 22
-        }
-    } catch {}
-    return $false
-}
-
-# ========== 安装 Node.js ==========
-function Install-Node {
-    if (Test-NodeInstalled) {
-        Log-Success "Node.js $(node --version) 已安装"
-        return
-    }
-    
-    Log-Warn "需要安装 Node.js 22+"
-    
-    # 检测 winget
-    if (Get-Command winget -ErrorAction SilentlyContinue) {
-        Log-Info "使用 winget 安装 Node.js 22..."
-        winget install OpenJS.NodeJS.LTS -v 22.14.0 --silent --accept-package-agreements --accept-source-agreements
+foreach ($url in $testUrls) {
+    if (Test-Url -Url $url) {
+        Write-Success "✓ $url 可访问"
     } else {
-        # 手动下载
-        Log-Info "手动下载 Node.js 22..."
-        
-        $nodeMirror = Find-BestMirror "Node.js" @("https://nodejs.org", "https://nvm.uihtm.com")
-        if (-not $nodeMirror) { $nodeMirror = "https://nodejs.org" }
-        
-        $url = "$nodeMirror/dist/v22.14.0/node-v22.14.0-x64.msi"
-        $output = "$env:TEMP\node.msi"
-        
-        Log-Info "下载: $url"
-        Invoke-WebRequest -Uri $url -OutFile $output -UseBasicParsing
-        
-        Log-Info "安装中..."
-        Start-Process msiexec.exe -ArgumentList "/i", $output, "/quiet", "/norestart" -Wait
-        Remove-Item $output -Force
-        
-        # 刷新环境变量
-        $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
+        Write-Warn "✗ $url 无法访问"
     }
-    
-    Log-Success "Node.js 安装完成: $(node --version)"
 }
 
-# ========== 配置 NPM 镜像 ==========
-function Setup-NpmMirror {
-    $npmMirror = Find-BestMirror "NPM" $Script:NpmMirrors
-    if (-not $npmMirror) { $npmMirror = "https://registry.npmjs.org" }
+#=============================================
+# 3. 安装 Node.js
+#=============================================
+function Install-NodeJS {
+    Write-Info "检查 Node.js..."
     
-    npm config set registry $npmMirror
-    Log-Success "NPM 镜像已配置: $npmMirror"
-}
-
-# ========== 安装 OpenClaw ==========
-function Install-Openclaw {
-    Log-Info "安装 OpenClaw 到 $InstallDir..."
-    
-    # 创建目录
-    New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
-    Set-Location $InstallDir
-    
-    # 下载源码
-    $githubMirror = Find-BestMirror "GitHub" $Script:GithubMirrors
-    if (-not $githubMirror) { $githubMirror = "https://github.com" }
-    
-    $downloadUrl = "$githubMirror/openclaw/openclaw/archive/refs/heads/main.zip"
-    $zipFile = "$InstallDir\main.zip"
-    
-    Log-Info "下载源码: $downloadUrl"
-    
-    try {
-        Invoke-WebRequest -Uri $downloadUrl -OutFile $zipFile -UseBasicParsing
+    $nodeCmd = Get-Command node -ErrorAction SilentlyContinue
+    if ($nodeCmd) {
+        $version = node --version
+        Write-Success "Node.js 已安装: $version"
         
-        Log-Info "解压中..."
-        Expand-Archive -Path $zipFile -DestinationPath $InstallDir -Force
-        
-        # 处理目录
-        if (Test-Path "$InstallDir\openclaw-main") {
-            Get-ChildItem "$InstallDir\openclaw-main\*" | Move-Item -Destination $InstallDir -Force
-            Remove-Item "$InstallDir\openclaw-main" -Recurse -Force
-        }
-        
-        Remove-Item $zipFile -Force
-    } catch {
-        Log-Warn "下载失败，尝试 git 克隆..."
-        if (Get-Command git -ErrorAction SilentlyContinue) {
-            git clone $Script:OpenclawRepo .
+        # 检查版本
+        $major = [int]($version -replace 'v', '' -split '\.')[0]
+        if ($major -lt 18) {
+            Write-Warn "Node.js 版本过低 ($version)，建议升级"
+            $env:CHOICE = Read-Host "是否升级? (y/N)"
+            if ($env:CHOICE -ne 'y') { return }
         } else {
-            Log-Error "git 未安装，请先安装 git"
-            exit 1
+            return
         }
     }
     
-    Log-Info "安装依赖..."
-    npm install
+    Write-Info "正在安装 Node.js 22..."
     
-    Log-Success "OpenClaw 安装完成!"
+    # 下载 nvm-windows
+    $nvmDir = "$env:APPDATA\nvm"
+    if (-not (Test-Path $nvmDir)) {
+        Write-Info "下载 nvm for Windows..."
+        $nvmZip = "$env:TEMP\nvm.zip"
+        Invoke-WebRequest -Uri "https://github.com/coreybutler/nvm-windows/releases/download/1.77.1/nvm-setup.zip" -OutFile $nvmZip -UseBasicParsing
+        Expand-Archive -Path $nvmZip -DestinationPath "$env:TEMP\nvm" -Force
+        Start-Process -FilePath "$env:TEMP\nvm\nvm-setup.exe" -Wait
+        Remove-Item $nvmZip, "$env:TEMP\nvm" -Recurse -Force
+    }
+    
+    # 使用 nvm 安装 Node.js
+    & "$nvmDir\nvm.exe" install 22
+    & "$nvmDir\nvm.exe" use 22
+    
+    # 刷新环境变量
+    $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH", "User")
+    
+    Write-Success "Node.js 安装完成: $(node --version)"
 }
 
-# ========== 主流程 ==========
-function Main {
-    Write-ColorOutput @"
-
-╔═══════════════════════════════════════╗
-║     OpenClaw 国内一键安装脚本 🐾        ║
-╚═══════════════════════════════════════╝
-"@ "Green"
-    
-    Log-Info "检测 Windows 版本..."
-    
-    # 1. 安装 Node.js
-    Install-Node
-    
-    # 2. 配置 NPM 镜像
-    Setup-NpmMirror
-    
-    # 3. 安装 OpenClaw
-    Install-Openclaw
-    
-    Write-ColorOutput @"
-
-╔═══════════════════════════════════════╗
-║           安装完成! 🎉                ║
-╚═══════════════════════════════════════╝
-"@ "Green"
-    
-    Write-Host "下一步:" -ForegroundColor White
-    Write-Host "  cd $InstallDir" -ForegroundColor Gray
-    Write-Host "  npx openclaw init" -ForegroundColor Gray
-    Write-Host ""
+if (-not $SkipNodeInstall) {
+    Install-NodeJS
 }
 
-Main
+#=============================================
+# 4. 配置 NPM 镜像
+#=============================================
+Write-Info "配置 NPM 镜像..."
+
+$mirrors = @(
+    "https://registry.npmmirror.com",
+    "https://npm.tuna.tsinghua.edu.cn",
+    "https://registry.npmjs.org"
+)
+
+$bestMirror = ""
+$bestTime = 999
+
+foreach ($mirror in $mirrors) {
+    Write-Info "测试 $mirror..."
+    $sw = [Diagnostics.Stopwatch]::StartNew()
+    if (Test-Url -Url $mirror -Timeout 3) {
+        $sw.Stop()
+        $time = $sw.ElapsedMilliseconds
+        Write-Info "  响应时间: ${time}ms"
+        if ($time -lt $bestTime) {
+            $bestTime = $time
+            $bestMirror = $mirror
+        }
+    }
+}
+
+if ($bestMirror) {
+    npm config set registry $bestMirror
+    Write-Success "已配置 NPM 镜像: $bestMirror"
+} else {
+    Write-Warn "无可用镜像，使用默认"
+}
+
+#=============================================
+# 5. 配置 GitHub 加速
+#=============================================
+Write-Info "配置 GitHub 加速..."
+
+$ghMirrors = @(
+    "https://ghproxy.com",
+    "https://mirror.ghproxy.com",
+    "https://moeyy.cn"
+)
+
+$bestGhMirror = ""
+foreach ($mirror in $ghMirrors) {
+    if (Test-Url -Url "$mirror/https://github.com" -Timeout 3) {
+        $bestGhMirror = $mirror
+        break
+    }
+}
+
+if ($bestGhMirror) {
+    git config --global url."$bestGhMirror".insteadOf "https://github.com"
+    Write-Success "已配置 GitHub 加速: $bestGhMirror"
+} else {
+    Write-Warn "无可用 GitHub 加速镜像"
+}
+
+#=============================================
+# 6. 安装 OpenClaw
+#=============================================
+Write-Info "安装 OpenClaw..."
+
+$openclawCmd = Get-Command openclaw -ErrorAction SilentlyContinue
+if ($openclawCmd) {
+    Write-Success "OpenClaw 已安装: $(openclaw --version)"
+    
+    $env:CHOICE = Read-Host "是否更新? (y/N)"
+    if ($env:CHOICE -ne 'y') {
+        Write-Info "跳过更新"
+    } else {
+        npm install -g openclaw --force
+    }
+} else {
+    npm install -g openclaw
+}
+
+if (Get-Command openclaw -ErrorAction SilentlyContinue) {
+    Write-Success "OpenClaw 安装成功!"
+} else {
+    Write-Error "OpenClaw 安装失败"
+    exit 1
+}
+
+#=============================================
+# 7. 初始化
+#=============================================
+Write-Info "初始化 OpenClaw..."
+
+if (Test-Path "$env:USERPROFILE\.openclaw") {
+    Write-Info "OpenClaw 已初始化"
+    $env:CHOICE = Read-Host "是否重新初始化? (y/N)"
+    if ($env:CHOICE -ne 'y') {
+        Write-Info "跳过初始化"
+    } else {
+        openclaw init
+    }
+} else {
+    openclaw init
+}
+
+Write-Success "初始化完成"
+
+#=============================================
+# 8. 启动 Gateway
+#=============================================
+if (-not $SkipGatewayStart) {
+    $env:CHOICE = Read-Host "是否启动 Gateway? (Y/n)"
+    if ($env:CHOICE -ne 'n') {
+        Write-Info "启动 Gateway..."
+        openclaw gateway start
+        Write-Success "Gateway 已启动"
+    }
+}
+
+Write-Host
+Write-Host "========================================" -ForegroundColor Magenta
+Write-Success "安装完成! 🎉" -ForegroundColor Magenta
+Write-Host "========================================" -ForegroundColor Magenta
+Write-Host
+Write-Host "常用命令:"
+Write-Host "  openclaw gateway start   # 启动服务"
+Write-Host "  openclaw gateway status # 查看状态"
+Write-Host "  openclaw help           # 查看帮助"
+Write-Host
