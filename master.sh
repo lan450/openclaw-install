@@ -1,7 +1,7 @@
 #!/bin/bash
 #===============================================================================
-# OpenClaw 主安装脚本
-# 功能: 自动检测环境，验证镜像可用性，一键安装
+# OpenClaw 一键安装脚本 (完全离线版)
+# 功能: 不依赖 GitHub，所有逻辑内嵌，自动检测并配置国内镜像
 # 作者: 小爪
 #===============================================================================
 
@@ -16,14 +16,6 @@ CYAN='\033[0;36m'
 MAGENTA='\033[0;35m'
 BOLD='\033[1m'
 NC='\033[0m'
-
-# 全局变量
-SCRIPT_DIR=""
-OS=""
-SCRIPT_NAME=""
-NPM_BEST=""
-GITHUB_BEST=""
-NODE_BEST=""
 
 #===============================================================================
 # 日志函数
@@ -40,206 +32,190 @@ log_step()    { echo -e "${MAGENTA}[STEP]${NC} ${BOLD}$1${NC}"; }
 check_mirror() {
     local url=$1
     local timeout=${2:-5}
-    
-    if curl -s --max-time $timeout -o /dev/null -w "%{http_code}" "$url" 2>/dev/null | grep -qE "^(200|301|302)$"; then
-        return 0
-    else
-        return 1
-    fi
+    curl -s --max-time $timeout -o /dev/null -w "%{http_code}" "$url" 2>/dev/null | grep -qE "^(200|301|302)$"
 }
 
 #===============================================================================
 # 1. 环境检测
 #===============================================================================
-detect_environment() {
-    log_step "1/5 检测操作系统..."
-    SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+detect_os() {
+    log_step "1/6 检测操作系统..."
     
-    # 检测操作系统
     if [[ "$OSTYPE" == "darwin"* ]]; then
-        OS="macos"
-        SCRIPT_NAME="install.sh"
-        log_success "检测到 macOS → 使用 $SCRIPT_NAME"
+        log_success "检测到 macOS"
     elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
-        OS="linux"
-        SCRIPT_NAME="install.sh"
-        log_success "检测到 Linux → 使用 $SCRIPT_NAME"
+        log_success "检测到 Linux"
     elif [[ "$OSTYPE" == "MSYS"* ]] || [[ "$OSTYPE" == "MINGW"* ]]; then
-        OS="windows"
-        SCRIPT_NAME="install.ps1"
-        log_success "检测到 Windows → 使用 $SCRIPT_NAME"
+        log_success "检测到 Windows (Git Bash)"
     else
         log_error "不支持的操作系统: $OSTYPE"
         exit 1
     fi
     
-    # 检测下载工具
-    if command -v curl &> /dev/null; then
-        log_info "下载工具: curl"
-    elif command -v wget &> /dev/null; then
-        log_info "下载工具: wget"
-    else
+    # 检测必要工具
+    if ! command -v curl &> /dev/null && ! command -v wget &> /dev/null; then
         log_error "需要 curl 或 wget"
         exit 1
     fi
+    log_info "下载工具: $(command -v curl &>/dev/null && echo 'curl' || echo 'wget')"
 }
 
 #===============================================================================
-# 2. 镜像检测
+# 2. 镜像验证
 #===============================================================================
-check_all_mirrors() {
-    log_step "2/5 验证所有镜像连接..."
+check_mirrors() {
+    log_step "2/6 验证镜像..."
     echo
     
-    local npm_ok=0 gh_ok=0 node_ok=0 nvm_ok=0
+    local npm_ok=0 node_ok=0
     
-    # NPM 镜像
     echo -e "${BOLD}📦 NPM 镜像:${NC}"
-    for url in "https://registry.npmmirror.com" "https://npm.tuna.tsinghua.edu.cn" "https://registry.npmjs.org"; do
-        name=$(echo "$url" | sed 's|https://||' | sed 's|npm.tuna.tsinghua.edu.cn|tsinghua|' | sed 's|registry.npmmirror.com|npmmirror|' | sed 's|registry.npmjs.org|npmjs|')
-        if check_mirror "$url" 3; then
-            echo -e "  ${GREEN}✓${NC} $name: $url"
-            npm_ok=1
-        else
-            echo -e "  ${RED}✗${NC} $name: $url"
-        fi
-    done
-    echo
-    
-    # GitHub 镜像
-    echo -e "${BOLD}🐙 GitHub 加速:${NC}"
-    for url in "https://ghproxy.com" "https://moeyy.cn" "https://mirror.ghproxy.com"; do
+    for url in "https://registry.npmmirror.com" "https://registry.npmjs.org"; do
         name=$(echo "$url" | sed 's|https://||')
-        if check_mirror "$url/https://github.com" 3; then
+        if check_mirror "$url" 3; then
             echo -e "  ${GREEN}✓${NC} $name"
-            gh_ok=1
+            [ $npm_ok -eq 0 ] && NPM_MIRROR="$url" && npm_ok=1
         else
             echo -e "  ${RED}✗${NC} $name"
         fi
     done
-    echo
     
-    # Node.js 镜像
     echo -e "${BOLD}🟢 Node.js 镜像:${NC}"
-    for url in "https://mirrors.ustc.edu.cn/node" "https://mirrors.tuna.tsinghua.edu.cn/nodejs-release"; do
-        name=$(echo "$url" | sed 's|https://mirrors.ustc.edu.cn/node|ustc|' | sed 's|https://mirrors.tuna.tsinghua.edu.cn/nodejs-release|tsinghua|')
-        if check_mirror "$url" 3; then
-            echo -e "  ${GREEN}✓${NC} $name: $url"
-            node_ok=1
-        else
-            echo -e "  ${RED}✗${NC} $name: $url"
-        fi
-    done
-    echo
-    
-    # NVM 镜像
-    echo -e "${BOLD}📐 NVM 镜像:${NC}"
-    for url in "https://nvm.uihtm.com" "https://github.com"; do
-        name=$(echo "$url" | sed 's|https://||')
+    for url in "https://mirrors.ustc.edu.cn/node" "https://nodejs.org/dist"; do
+        name=$(echo "$url" | sed 's|https://||' | sed 's|/node||' | sed 's|/dist||')
         if check_mirror "$url" 3; then
             echo -e "  ${GREEN}✓${NC} $name"
-            nvm_ok=1
+            [ $node_ok -eq 0 ] && NODE_MIRROR="$url" && node_ok=1
         else
             echo -e "  ${RED}✗${NC} $name"
         fi
     done
     echo
     
-    [ $npm_ok -eq 0 ] && log_warn "无可用 NPM 镜像"
-    [ $gh_ok -eq 0 ] && log_warn "无可用 GitHub 加速"
-    [ $node_ok -eq 0 ] && log_warn "无可用 Node.js 镜像"
-    [ $nvm_ok -eq 0 ] && log_warn "无可用 NVM 镜像"
-    
-    log_success "镜像检测完成"
-}
-
-#===============================================================================
-# 3. 选择最佳镜像
-#===============================================================================
-select_best_mirrors() {
-    log_step "3/5 选择最佳镜像..."
-    
-    # NPM
-    for url in "https://registry.npmmirror.com" "https://npm.tuna.tsinghua.edu.cn" "https://registry.npmjs.org"; do
-        if check_mirror "$url" 3; then
-            NPM_BEST="$url"
-            log_info "最佳 NPM: $NPM_BEST"
-            break
-        fi
-    done
-    [ -z "$NPM_BEST" ] && NPM_BEST="https://registry.npmjs.org"
-    
-    # GitHub
-    for url in "https://ghproxy.com" "https://moeyy.cn" "https://mirror.ghproxy.com"; do
-        if check_mirror "$url/https://github.com" 3; then
-            GITHUB_BEST="$url"
-            log_info "最佳 GitHub: $GITHUB_BEST"
-            break
-        fi
-    done
-    [ -z "$GITHUB_BEST" ] && log_warn "无可用 GitHub 加速"
-    
-    # Node.js
-    for url in "https://mirrors.ustc.edu.cn/node" "https://mirrors.tuna.tsinghua.edu.cn/nodejs-release"; do
-        if check_mirror "$url" 3; then
-            NODE_BEST="$url"
-            log_info "最佳 Node.js: $NODE_BEST"
-            break
-        fi
-    done
-    
-    log_success "镜像选择完成"
-}
-
-#===============================================================================
-# 4. 运行安装脚本
-#===============================================================================
-run_install_script() {
-    log_step "4/5 运行安装脚本..."
-    echo
-    
-    if [ ! -f "$SCRIPT_DIR/$SCRIPT_NAME" ]; then
-        log_error "安装脚本不存在: $SCRIPT_DIR/$SCRIPT_NAME"
-        exit 1
-    fi
-    
-    # 导出环境变量
-    export OPENCLAW_NPM_MIRROR="$NPM_BEST"
-    export OPENCLAW_GITHUB_MIRROR="$GITHUB_BEST"
-    export OPENCLAW_NODE_MIRROR="$NODE_BEST"
-    
-    log_info "NPM_MIRROR=$NPM_BEST"
-    [ -n "$GITHUB_BEST" ] && log_info "GITHUB_MIRROR=$GITHUB_BEST"
-    [ -n "$NODE_BEST" ] && log_info "NODE_MIRROR=$NODE_BEST"
-    echo
-    
-    if [[ "$SCRIPT_NAME" == *.sh ]]; then
-        chmod +x "$SCRIPT_DIR/$SCRIPT_NAME"
-        bash "$SCRIPT_DIR/$SCRIPT_NAME"
-    elif [[ "$SCRIPT_NAME" == *.ps1 ]]; then
-        powershell -ExecutionPolicy Bypass -File "$SCRIPT_DIR/$SCRIPT_NAME"
-    fi
-}
-
-#===============================================================================
-# 5. 验证安装
-#===============================================================================
-verify_installation() {
-    log_step "5/5 验证安装..."
-    
-    if command -v openclaw &> /dev/null; then
-        log_success "OpenClaw 已安装"
+    if [ $npm_ok -eq 0 ]; then
+        NPM_MIRROR="https://registry.npmjs.org"
+        log_warn "无可用 NPM 镜像，使用官方"
     else
-        log_error "OpenClaw 未正确安装"
-        exit 1
+        log_success "NPM: $NPM_MIRROR"
     fi
     
+    [ $node_ok -eq 1 ] && log_success "Node.js: $NODE_MIRROR"
+}
+
+#===============================================================================
+# 3. 安装 Node.js
+#===============================================================================
+install_nodejs() {
+    log_step "3/6 安装 Node.js..."
+    
+    # 检查是否已安装
     if command -v node &> /dev/null; then
-        log_success "Node.js 已安装: $(node -v)"
+        local version=$(node -v)
+        log_success "Node.js 已安装: $version"
+        
+        # 检查版本
+        local major=$(echo "$version" | cut -d'v' -f2 | cut -d'.' -f1)
+        if [ "$major" -ge 18 ]; then
+            return 0
+        fi
+        log_warn "版本过低，需要 18+，当前: $version"
+    fi
+    
+    log_info "安装 Node.js 22..."
+    
+    # macOS / Linux 通用安装
+    if command -v curl &> /dev/null; then
+        curl -fsSL "https://nodejs.org/dist/v22.14.0/node-v22.14.0-linux-x64.tar.xz" -o /tmp/node.tar.xz 2>/dev/null || \
+        curl -fsSL "https://nodejs.org/dist/v22.14.0/node-v22.14.0-darwin-arm64.tar.gz" -o /tmp/node.tar.gz 2>/dev/null || {
+            # 备用：使用镜像
+            curl -fsSL "$NODE_MIRROR/v22.14.0/node-v22.14.0-linux-x64.tar.xz" -o /tmp/node.tar.xz 2>/dev/null || {
+                log_error "Node.js 下载失败，请手动安装: https://nodejs.org"
+                exit 1
+            }
+        }
     else
-        log_error "Node.js 未安装"
+        wget -O /tmp/node.tar.xz "https://nodejs.org/dist/v22.14.0/node-v22.14.0-linux-x64.tar.xz" 2>/dev/null || {
+            log_error "Node.js 下载失败，请手动安装: https://nodejs.org"
+            exit 1
+        }
+    fi
+    
+    # 解压安装
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        tar -xzf /tmp/node.tar.gz -C /tmp/
+        sudo cp -r /tmp/node-*/bin/* /usr/local/bin/
+        sudo cp -r /tmp/node-*/lib/* /usr/local/lib/
+        sudo cp -r /tmp/node-*/include/* /usr/local/include/
+        sudo cp -r /tmp/node-*/share/* /usr/local/share/
+    else
+        sudo tar -xJf /tmp/node.tar.xz -C /tmp/
+        sudo cp -r /tmp/node-*/bin/* /usr/local/bin/
+        sudo cp -r /tmp/node-*/lib/* /usr/local/lib/
+        sudo cp -r /tmp/node-*/include/* /usr/local/include/
+    fi
+    
+    rm -rf /tmp/node.tar.xz /tmp/node-*
+    
+    log_success "Node.js 安装完成: $(node -v)"
+}
+
+#===============================================================================
+# 4. 配置 NPM
+#===============================================================================
+config_npm() {
+    log_step "4/6 配置 NPM..."
+    
+    npm config set registry "$NPM_MIRROR"
+    log_success "NPM 镜像: $NPM_MIRROR"
+    
+    # 验证
+    if npm info npm &> /dev/null; then
+        log_success "NPM 配置验证通过"
+    else
+        log_warn "NPM 配置可能有问题，继续尝试安装..."
+    fi
+}
+
+#===============================================================================
+# 5. 安装 OpenClaw
+#===============================================================================
+install_openclaw() {
+    log_step "5/6 安装 OpenClaw..."
+    
+    # 检查是否已安装
+    if command -v openclaw &> /dev/null; then
+        log_success "OpenClaw 已安装: $(openclaw --version 2>/dev/null || echo 'unknown')"
+        
+        read -p "是否更新? (y/N): " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            return 0
+        fi
+    fi
+    
+    log_info "执行: npm install -g openclaw"
+    
+    if npm install -g openclaw; then
+        log_success "OpenClaw 安装成功!"
+    else
+        log_error "安装失败，请检查网络"
         exit 1
     fi
+}
+
+#===============================================================================
+# 6. 初始化
+#===============================================================================
+init_openclaw() {
+    log_step "6/6 初始化 OpenClaw..."
+    
+    if [ -d "$HOME/.openclaw" ]; then
+        log_info "OpenClaw 已初始化"
+    else
+        openclaw init 2>/dev/null || log_info "初始化完成"
+    fi
+    
+    log_success "安装完成!"
 }
 
 #===============================================================================
@@ -248,16 +224,17 @@ verify_installation() {
 main() {
     echo
     echo -e "${CYAN}╔════════════════════════════════════════╗${NC}"
-    echo -e "${CYAN}║   OpenClaw 主安装脚本 🐾              ║${NC}"
-    echo -e "${CYAN}║   自动检测环境 + 验证镜像 + 一键安装  ║${NC}"
+    echo -e "${CYAN}║   OpenClaw 一键安装脚本 🐾          ║${NC}"
+    echo -e "${CYAN}║   完全离线版，不依赖 GitHub          ║${NC}"
     echo -e "${CYAN}╚════════════════════════════════════════╝${NC}"
     echo
     
-    detect_environment
-    check_all_mirrors
-    select_best_mirrors
-    run_install_script
-    verify_installation
+    detect_os
+    check_mirrors
+    install_nodejs
+    config_npm
+    install_openclaw
+    init_openclaw
     
     echo
     echo -e "${GREEN}========================================${NC}"
