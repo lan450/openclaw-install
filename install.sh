@@ -7,6 +7,45 @@
 
 set -e
 
+#===============================================================================
+# 下载源配置 (多源 fallback)
+#===============================================================================
+# Gitee 镜像 (国内推荐)
+GITEE_RAW="https://gitee.com/lan450/openclaw-install/raw/main/install.sh"
+# GitHub 镜像 (海外)
+GITHUB_RAW="https://raw.githubusercontent.com/lan450/openclaw-install/main/install.sh"
+
+# 尝试下载脚本 (如果用户已经有脚本则跳过)
+download_script() {
+    local output=$1
+    local sources=("$GITEE_RAW" "$GITHUB_RAW")
+    
+    for src in "${sources[@]}"; do
+        echo -e "${BLUE}[INFO]${NC} 尝试从 $src 下载..."
+        if curl -fsSL --max-time 30 "$src" -o "$output" 2>/dev/null; then
+            echo -e "${GREEN}[SUCCESS]${NC} 下载成功!"
+            return 0
+        fi
+        echo -e "${YELLOW}[WARN]${NC} $src 不可用，尝试下一个..."
+    done
+    
+    echo -e "${RED}[ERROR]${NC} 所有下载源均不可用"
+    echo -e "${YELLOW}[提示]${NC} 请手动访问以下地址保存脚本:"
+    echo "  - https://gitee.com/lan450/openclaw-install"
+    echo "  - https://github.com/lan450/openclaw-install"
+    return 1
+}
+
+# 如果没有脚本参数，尝试自动下载
+if [ ! -f "$0" ] || [ "$0" = "/bin/bash" ] || [ "$0" = "/usr/bin/bash" ]; then
+    SCRIPT_TMP="/tmp/openclaw_install_$$.sh"
+    if download_script "$SCRIPT_TMP"; then
+        exec bash "$SCRIPT_TMP"
+    else
+        exit 1
+    fi
+fi
+
 # 颜色定义
 RED='\033[0;31m'
 GREEN='\033[0;32m'
